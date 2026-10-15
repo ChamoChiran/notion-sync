@@ -74,33 +74,21 @@ class NotionClient:
         body = {"type": "update_content", "update_content": {"content_updates": updates}}
         return self._request("PATCH", f"/pages/{page_id}/markdown", body)
 
-    # -- databases and pages -------------------------------------------
+    # -- pages ---------------------------------------------------------
 
-    def create_database(self, parent, title, properties):
-        """Create a database; returns the object (with `data_sources`).
+    def create_page(self, parent, markdown):
+        """Create a page from Markdown; a leading `# ` heading becomes its title.
 
         `parent` is a Notion parent object: a page (`{"type": "page_id", ...}`) or the
         workspace (`{"type": "workspace", "workspace": True}`).
         """
-        return self._request("POST", "/databases", {
-            "parent": parent,
-            "title": [{"type": "text", "text": {"content": title}}],
-            "initial_data_source": {"properties": properties},
-        })
+        return self._request("POST", "/pages", {"parent": parent, "markdown": markdown})
 
-    def create_page(self, data_source_id, properties):
-        return self._request("POST", "/pages", {
-            "parent": {"type": "data_source_id", "data_source_id": data_source_id},
-            "properties": properties,
-        })
+    def trash_page(self, page_id):
+        return self._request("PATCH", f"/pages/{page_id}", {"in_trash": True})
 
-    def update_page(self, page_id, properties=None, in_trash=None):
-        body = {}
-        if properties is not None:
-            body["properties"] = properties
-        if in_trash is not None:
-            body["in_trash"] = in_trash
-        return self._request("PATCH", f"/pages/{page_id}", body)
+    def trash_database(self, database_id):
+        return self._request("PATCH", f"/databases/{database_id}", {"in_trash": True})
 
     # -- search --------------------------------------------------------
 

@@ -52,13 +52,14 @@ class DocumentLoader:
 
     def load(self, root):
         root = Path(root)
-        docs = []
-        for file in sorted(root.rglob("*.md")):
+        found = []
+        for file in root.rglob("*.md"):
             rel = file.relative_to(root)
-            if any(part.startswith(".") for part in rel.parts):
-                continue
-            docs.append(self._load_one(file, rel.as_posix()))
-        return docs
+            if not any(part.startswith(".") for part in rel.parts):
+                found.append((file, rel.as_posix()))
+        # Deterministic on every OS: top-level files first, then folders, alphabetical.
+        found.sort(key=lambda item: ("/" in item[1], item[1].lower()))
+        return [self._load_one(file, rel) for file, rel in found]
 
     def _load_one(self, file, rel_path):
         meta, body = self._parser.parse(file.read_text(encoding="utf-8"))

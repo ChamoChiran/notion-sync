@@ -37,6 +37,13 @@ class PageSyncService:
         """Apply (old, new) text replacements without touching the rest of the page."""
         self._client.update_markdown(page.id, replacements, replace_all)
 
+    def trash(self, ref, is_database=False):
+        """Move a page or database to Notion's trash (recoverable from there)."""
+        if is_database:
+            self._client.trash_database(ref.id)
+        else:
+            self._client.trash_page(ref.id)
+
     def search(self, query):
         return [self._to_hit(p) for p in self._client.search_pages(query)]
 

@@ -37,41 +37,54 @@ notion-sync edit <page-url-or-id> -r "old text" "new text"   # change just that 
 
 ## Publishing a docs folder (git → Notion)
 
-Keep docs in git and mirror them into a Notion database, one page per `.md` file:
+Keep docs in git and mirror them into Notion as a tree of pages that follows the folders:
+
+```
+Centric Docs            root page
+├─ Guide                README.md
+├─ Architecture         folder page
+│  ├─ Overview          architecture/00-overview.md
+│  └─ Components        folder page
+│     └─ Backend API    architecture/components/backend-api.md
+└─ Templates            folder page
+```
 
 ```powershell
-# first run: create the database under a Notion page and publish everything
-notion-sync publish docs --parent <notion-page-url> --title "Centric Docs" `
-    --source-url https://github.com/org/repo/blob/main
-# later runs (CI): updates only the files that changed
+# first run: create the root page and publish everything
+notion-sync publish docs --parent workspace --title "Centric Docs"
+# later runs (CI): only changed files are rewritten
 notion-sync publish docs --prune
 ```
 
-- `--parent workspace` creates the database at the top level of your workspace (private to the token owner until you move or share it); a page URL must be a regular page, not a person profile.
 - Git is the source of truth. Pages are overwritten on every change, so edit in git only.
-- `notion-map.json` (path → page id, content hash) is written next to where you run the
-  command. **Commit it**, so every run updates the same pages.
-- Properties come from optional front matter at the top of each file:
+- `--parent` is a Notion page URL (a regular page, not a person profile) or `workspace`
+  for a private top-level page. It is only used on the first run.
+- `notion-map.json` (folders, path → page id, content hash) is written next to where you
+  run the command. **Commit it**, so every run updates the same pages. A map from an older
+  layout is ignored and rebuilt.
+- Pages cannot hold properties, so optional front matter (`status`, `owner`, `component`,
+  `last_reviewed`) is shown as a one-line summary at the top of each page. Keep it flat
+  (`key: value`, no inline comments):
 
   ```markdown
   ---
-  type: Architecture
   status: Draft
   owner: Name
-  component: Backend API
   last_reviewed: 2026-10-15
   ---
   # Page title
   ```
 
-  All keys are optional and flat (`key: value`, no inline comments). `type` defaults from
-  the folder (`architecture/decisions/` → ADR, `runbooks/` → Runbook, and so on). The first
-  `# ` heading becomes the page title (not repeated in the body). Database columns: Name,
-  Type, Component, Status, Owner, Last reviewed, Source, Path.
+  The first `# ` heading becomes the page title (not repeated in the body).
 - Relative links between `.md` files are rewritten to Notion page links; links to files that
   aren't published stay as they are.
-- `--prune` moves pages whose file was deleted to Notion's trash (recoverable there).
+- Order: top-level files first, then folders, alphabetical by path.
+- `--prune` moves pages for deleted files, and folders left empty, to Notion's trash.
 - If a page is deleted in Notion, the next run recreates it.
+- Not handled: renaming a page's title after creation, and moving a file (a moved file
+  becomes a new page; use `--prune` to trash the old one).
+
+`notion-sync trash <page-url-or-id> [--database]` moves a page or database to Notion's trash.
 
 ## Limits
 

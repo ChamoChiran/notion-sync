@@ -6,12 +6,13 @@ import unittest
 from pathlib import Path
 
 from notion_sync.cli import Cli
-from notion_sync.documents import DocumentLoader, FrontMatterParser
+from notion_sync.documents import Document, DocumentLoader, FrontMatterParser
 from notion_sync.errors import ConfigError, NotionApiError
 from notion_sync.links import LinkRewriter
-from notion_sync.properties import PagePropertyBuilder
 from notion_sync.publisher import DocsPublisher
+from notion_sync.service import PageSyncService
 from notion_sync.state import PublishState
+from notion_sync.page_ref import PageRef
 
 PARENT = "0123456789abcdef0123456789abcdef"
 
@@ -41,10 +42,11 @@ class LoaderTests(unittest.TestCase):
             (root / ".hidden" / "x.md").write_text("# no", encoding="utf-8")
             (root / "untitled-doc.md").write_text("text only\n", encoding="utf-8")
             docs = DocumentLoader().load(root)
-        self.assertEqual([x.path for x in docs], ["architecture/a.md", "untitled-doc.md"])
-        self.assertEqual(docs[0].title, "Title A")
-        self.assertEqual(docs[0].body, "body\n")  # H1 moved into the title
-        self.assertEqual(docs[1].title, "untitled doc")
+        # top-level files first, then folders
+        self.assertEqual([x.path for x in docs], ["untitled-doc.md", "architecture/a.md"])
+        self.assertEqual(docs[1].title, "Title A")
+        self.assertEqual(docs[1].body, "body\n")  # H1 moved into the title
+        self.assertEqual(docs[0].title, "untitled doc")
 
 
 class LinkTests(unittest.TestCase):
@@ -62,130 +64,139 @@ class LinkTests(unittest.TestCase):
         self.assertEqual(self.rw.rewrite(text, "architecture/c.md"), text)
 
 
-class PropertyTests(unittest.TestCase):
-    def doc(self, path, **meta):
-        from notion_sync.documents import Document
-        return Document(path=path, title="T", body="b\n", meta=meta)
-
-    def test_type_from_path_and_front_matter(self):
-        b = PagePropertyBuilder("https://git/x/blob/main/")
-        p = b.build(self.doc("architecture/decisions/0001.md", status="Approved",
-                             owner="Me", last_reviewed="2026-10-15", component="Backend API"))
-        self.assertEqual(p["Type"], {"select": {"name": "ADR"}})
-        self.assertEqual(p["Status"]["select"]["name"], "Approved")
-        self.assertEqual(p["Last reviewed"], {"date": {"start": "2026-10-15"}})
-        self.assertEqual(p["Source"], {"url": "https://git/x/blob/main/architecture/decisions/0001.md"})
-        self.assertEqual(b.build(self.doc("README.md"))["Type"]["select"]["name"], "Guide")
-        self.assertEqual(b.build(self.doc("x.md", type="Policy"))["Type"]["select"]["name"], "Policy")
-
-    def test_bad_date_omitted(self):
-        p = PagePropertyBuilder().build(self.doc("x.md", last_reviewed="soon"))
-        self.assertNotIn("Last reviewed", p)
-        self.assertNotIn("Source", p)
-
-
 class FakeClient:
+    """Records calls; page ids are sequential so parents can be checked."""
+
     def __init__(self):
         self.calls = []
         self.n = 0
         self.fail_404_for = set()
+        self.titles = {}
 
-    def _id(self):
+    def create_page(self, parent, markdown):
         self.n += 1
-        return f"00000000-0000-0000-0000-{self.n:012d}"
-
-    def create_database(self, parent, title, props):
-        self.calls.append(("create_database", parent, title))
-        return {"id": "db-1", "data_sources": [{"id": "ds-1"}]}
-
-    def create_page(self, ds, props):
-        pid = self._id()
-        self.calls.append(("create_page", ds, props["Name"]["title"][0]["text"]["content"], pid))
+        pid = f"00000000-0000-0000-0000-{self.n:012d}"
+        self.titles[pid] = markdown.strip().lstrip("# ")
+        self.calls.append(("create_page", parent, markdown, pid))
         return {"id": pid}
 
-    def update_page(self, pid, properties=None, in_trash=None):
+    def replace_markdown(self, pid, body, allow_deleting_content=False):
         if pid in self.fail_404_for:
             raise NotionApiError(404, "PATCH", "/x", "{}")
-        self.calls.append(("update_page", pid, in_trash))
-
-    def replace_markdown(self, pid, body, allow_deleting_content=False):
         self.calls.append(("replace", pid, body))
+
+    def trash_page(self, pid):
+        self.calls.append(("trash_page", pid))
+
+    def trash_database(self, did):
+        self.calls.append(("trash_database", did))
 
 
 class PublisherTests(unittest.TestCase):
     def make_root(self, d):
         root = Path(d) / "docs"
-        (root / "architecture").mkdir(parents=True)
-        (root / "architecture" / "a.md").write_text("# A\n\nsee [b](b.md)\n", encoding="utf-8")
-        (root / "architecture" / "b.md").write_text("# B\n\ntext\n", encoding="utf-8")
+        (root / "architecture" / "components").mkdir(parents=True)
+        (root / "README.md").write_text("# Guide\n\nsee [a](architecture/a.md)\n", encoding="utf-8")
+        (root / "architecture" / "a.md").write_text(
+            "---\nstatus: Draft\nowner: Me\n---\n\n# A\n\ntext\n", encoding="utf-8")
+        (root / "architecture" / "components" / "c.md").write_text("# C\n\ntext\n", encoding="utf-8")
         return root
 
-    def names(self, client, kind):
-        return [c for c in client.calls if c[0] == kind]
+    def pages(self, client):
+        return [c for c in client.calls if c[0] == "create_page"]
 
-    def test_first_run_creates_database_pages_and_rewrites_links(self):
+    def test_first_run_builds_tree(self):
         with tempfile.TemporaryDirectory() as d:
             root, state = self.make_root(d), Path(d) / "map.json"
             client = FakeClient()
-            report = DocsPublisher(client).publish(root, state, parent=PARENT, title="Docs")
+            report = DocsPublisher(client).publish(root, state, parent=PARENT, title="Centric Docs")
             saved = json.loads(state.read_text(encoding="utf-8"))
-        self.assertEqual((report.created, report.updated, report.unchanged), (2, 2, 0))
-        self.assertEqual(self.names(client, "create_database")[0][1],
-                         {"type": "page_id", "page_id": PARENT})
-        self.assertEqual(saved["data_source_id"], "ds-1")
-        self.assertEqual(set(saved["pages"]), {"architecture/a.md", "architecture/b.md"})
-        a_body = next(c[2] for c in self.names(client, "replace")
-                      if "see" in c[2])
-        b_id = saved["pages"]["architecture/b.md"]["id"].replace("-", "")
-        self.assertIn(f"https://www.notion.so/{b_id}", a_body)
 
-    def test_second_run_skips_unchanged(self):
+        # root + 'architecture' + 'architecture/components' + 3 docs
+        self.assertEqual((report.created, report.updated, report.unchanged), (5, 3, 0))
+        titles = [client.titles[c[3]] for c in self.pages(client)]
+        self.assertEqual(titles, ["Centric Docs", "Guide", "Architecture", "A", "Components", "C"])
+        by_title = {client.titles[c[3]]: c for c in self.pages(client)}
+        root_id = saved["root_id"]
+        self.assertEqual(by_title["Centric Docs"][1], {"type": "page_id", "page_id": PARENT})
+        self.assertEqual(by_title["Guide"][1]["page_id"], root_id)
+        self.assertEqual(by_title["Architecture"][1]["page_id"], root_id)
+        self.assertEqual(by_title["A"][1]["page_id"], saved["folders"]["architecture"])
+        self.assertEqual(by_title["Components"][1]["page_id"], saved["folders"]["architecture"])
+        self.assertEqual(by_title["C"][1]["page_id"], saved["folders"]["architecture/components"])
+        self.assertEqual(saved["version"], 2)
+
+    def test_content_has_header_and_rewritten_links(self):
         with tempfile.TemporaryDirectory() as d:
             root, state = self.make_root(d), Path(d) / "map.json"
-            DocsPublisher(FakeClient()).publish(root, state, parent=PARENT)
             client = FakeClient()
-            report = DocsPublisher(client).publish(root, state)
-            self.assertEqual((report.created, report.updated, report.unchanged), (0, 0, 2))
-            self.assertEqual(client.calls, [])
-            (root / "architecture" / "b.md").write_text("# B\n\nchanged\n", encoding="utf-8")
-            report = DocsPublisher(client).publish(root, state)
-        self.assertEqual((report.updated, report.unchanged), (1, 1))
+            DocsPublisher(client).publish(root, state, parent=PARENT)
+            saved = json.loads(state.read_text(encoding="utf-8"))
+        bodies = {c[1]: c[2] for c in client.calls if c[0] == "replace"}
+        a_id = saved["pages"]["architecture/a.md"]["id"]
+        self.assertTrue(bodies[a_id].startswith("> **Status:** Draft · **Owner:** Me\n\ntext"))
+        guide = bodies[saved["pages"]["README.md"]["id"]]
+        self.assertIn("https://www.notion.so/" + a_id.replace("-", ""), guide)
 
     def test_workspace_parent(self):
         with tempfile.TemporaryDirectory() as d:
             client = FakeClient()
             DocsPublisher(client).publish(self.make_root(d), Path(d) / "m.json", parent="Workspace")
-        self.assertEqual(self.names(client, "create_database")[0][1],
-                         {"type": "workspace", "workspace": True})
+        self.assertEqual(self.pages(client)[0][1], {"type": "workspace", "workspace": True})
+
+    def test_second_run_skips_unchanged_then_updates_changed(self):
+        with tempfile.TemporaryDirectory() as d:
+            root, state = self.make_root(d), Path(d) / "map.json"
+            DocsPublisher(FakeClient()).publish(root, state, parent=PARENT)
+            client = FakeClient()
+            report = DocsPublisher(client).publish(root, state)
+            self.assertEqual((report.created, report.updated, report.unchanged), (0, 0, 3))
+            self.assertEqual(client.calls, [])
+            (root / "architecture" / "components" / "c.md").write_text("# C\n\nchanged\n", encoding="utf-8")
+            report = DocsPublisher(client).publish(root, state)
+        self.assertEqual((report.updated, report.unchanged), (1, 2))
 
     def test_requires_parent_on_first_run(self):
         with tempfile.TemporaryDirectory() as d:
             with self.assertRaises(ConfigError):
                 DocsPublisher(FakeClient()).publish(self.make_root(d), Path(d) / "m.json")
 
-    def test_prune_trashes_removed_files(self):
+    def test_old_database_state_is_ignored(self):
+        with tempfile.TemporaryDirectory() as d:
+            state = Path(d) / "map.json"
+            state.write_text(json.dumps({"database_id": "x", "pages": {"README.md": {"id": "old", "hash": "h"}}}),
+                             encoding="utf-8")
+            self.assertEqual(PublishState(state).pages, {})
+
+    def test_prune_trashes_removed_files_and_empty_folders(self):
         with tempfile.TemporaryDirectory() as d:
             root, state = self.make_root(d), Path(d) / "map.json"
             DocsPublisher(FakeClient()).publish(root, state, parent=PARENT)
-            (root / "architecture" / "b.md").unlink()
+            before = json.loads(state.read_text(encoding="utf-8"))
+            (root / "architecture" / "components" / "c.md").unlink()
             client = FakeClient()
             report = DocsPublisher(client).publish(root, state, prune=True)
-            saved = json.loads(state.read_text(encoding="utf-8"))
-        self.assertEqual(report.trashed, 1)
-        self.assertEqual(list(saved["pages"]), ["architecture/a.md"])
-        self.assertTrue(any(c[0] == "update_page" and c[2] is True for c in client.calls))
+            after = json.loads(state.read_text(encoding="utf-8"))
+        self.assertEqual(report.trashed, 2)  # the doc and the now-empty 'components' folder
+        self.assertEqual(set(after["pages"]), {"README.md", "architecture/a.md"})
+        self.assertEqual(set(after["folders"]), {"architecture"})
+        trashed = [c[1] for c in client.calls if c[0] == "trash_page"]
+        self.assertEqual(set(trashed), {before["pages"]["architecture/components/c.md"]["id"],
+                                        before["folders"]["architecture/components"]})
 
-    def test_page_deleted_in_notion_is_recreated(self):
+    def test_page_deleted_in_notion_is_recreated_under_same_parent(self):
         with tempfile.TemporaryDirectory() as d:
             root, state = self.make_root(d), Path(d) / "map.json"
             DocsPublisher(FakeClient()).publish(root, state, parent=PARENT)
-            old = PublishState(state).pages["architecture/b.md"]["id"]
-            (root / "architecture" / "b.md").write_text("# B\n\nedit\n", encoding="utf-8")
+            before = PublishState(state)
+            old = before.pages["architecture/a.md"]["id"]
+            (root / "architecture" / "a.md").write_text("# A\n\nedited\n", encoding="utf-8")
             client = FakeClient()
             client.fail_404_for = {old}
             report = DocsPublisher(client).publish(root, state)
-            new = PublishState(state).pages["architecture/b.md"]["id"]
-        self.assertNotEqual(old, new)
+            after = PublishState(state)
+        self.assertNotEqual(old, after.pages["architecture/a.md"]["id"])
+        self.assertEqual(self.pages(client)[0][1]["page_id"], before.folders["architecture"])
         self.assertEqual(report.updated, 1)
 
     def test_cli_publish(self):
@@ -199,12 +210,22 @@ class PublisherTests(unittest.TestCase):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             code = Cli(publisher_factory=lambda: pub).run(
-                ["publish", "docs", "--parent", PARENT, "--prune", "--source-url", "https://g/"])
+                ["publish", "docs", "--parent", "workspace", "--prune"])
         self.assertEqual(code, 0)
         self.assertIn("2 created, 1 updated, 3 unchanged, 0 trashed", out.getvalue())
         self.assertEqual(pub.args[0:2], ("docs", "notion-map.json"))
         self.assertTrue(pub.args[2]["prune"])
-        self.assertEqual(pub.args[2]["source_base_url"], "https://g/")
+
+    def test_cli_trash(self):
+        client = FakeClient()
+        service = PageSyncService(client)
+        for argv, expected in ((["trash", PARENT], "trash_page"),
+                               (["trash", PARENT, "--database"], "trash_database")):
+            client.calls.clear()
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(Cli(service_factory=lambda: service).run(argv), 0)
+            self.assertEqual(client.calls, [(expected, PARENT)])
 
 
 if __name__ == "__main__":

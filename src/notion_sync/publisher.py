@@ -1,13 +1,19 @@
 import hashlib
-import json
+import posixpath
 from dataclasses import dataclass
 
 from .documents import DocumentLoader
 from .errors import ConfigError, NotionApiError
 from .links import LinkRewriter
 from .page_ref import PageRef
-from .properties import DocsDatabaseSchema, PagePropertyBuilder
 from .state import PublishState
+
+_META_LABELS = (
+    ("status", "Status"),
+    ("owner", "Owner"),
+    ("component", "Component"),
+    ("last_reviewed", "Last reviewed"),
+)
 
 
 @dataclass
@@ -19,54 +25,50 @@ class PublishReport:
 
 
 class DocsPublisher:
-    """Publishes a folder of Markdown files into a Notion database, one page per file.
+    """Publishes a folder of Markdown files as a tree of Notion pages.
 
-    Git stays the source of truth: Notion pages are overwritten on every change.
-    Unchanged files are skipped (tracked by content hash in the state file).
+    Layout in Notion mirrors the folders: one root page, one page per folder, one page
+    per Markdown file. Git stays the source of truth; pages are overwritten on change,
+    and unchanged files are skipped (tracked by content hash in the state file).
     """
 
     def __init__(self, client, loader=None):
         self._client = client
         self._loader = loader or DocumentLoader()
 
-    def publish(self, root, state_path, parent=None, title="Docs", source_base_url=None, prune=False):
+    def publish(self, root, state_path, parent=None, title="Docs", prune=False):
         docs = self._loader.load(root)
         state = PublishState(state_path)
-        props = PagePropertyBuilder(source_base_url)
         report = PublishReport()
 
-        self._ensure_database(state, parent, title)
-        # Pass 1: make sure every page exists, so links can point at any of them.
+        self._ensure_root(state, parent, title)
+        # Pass 1: create every folder and page, so links can point at any of them.
         for doc in docs:
-            self._ensure_page(state, doc, props.build(doc), report)
+            self._ensure_page(state, doc, report)
         state.save()
 
-        # Pass 2: write properties and content, skipping pages that did not change.
+        # Pass 2: write content, skipping pages that did not change.
         links = LinkRewriter(state.page_ids())
         for doc in docs:
-            body = links.rewrite(doc.body, doc.path)
-            self._sync_page(state, doc, props.build(doc), body, report)
+            body = self._header(doc) + links.rewrite(doc.body, doc.path)
+            self._sync_page(state, doc, body, report)
             state.save()
 
         if prune:
-            self._prune(state, {d.path for d in docs}, report)
+            self._prune(state, docs, report)
             state.save()
         return report
 
-    # -- steps ---------------------------------------------------------
+    # -- structure -----------------------------------------------------
 
-    def _ensure_database(self, state, parent, title):
-        if state.data_source_id:
+    def _ensure_root(self, state, parent, title):
+        if state.root_id:
             return
         if not parent:
             raise ConfigError(
-                "no database yet: pass --parent <Notion page URL> (or 'workspace') for the first run"
+                "no root page yet: pass --parent <Notion page URL> (or 'workspace') for the first run"
             )
-        db = self._client.create_database(
-            self._parent_object(parent), title, DocsDatabaseSchema.properties()
-        )
-        state.database_id = db["id"]
-        state.data_source_id = db["data_sources"][0]["id"]
+        state.root_id = self._client.create_page(self._parent_object(parent), f"# {title}\n")["id"]
         state.save()
 
     @staticmethod
@@ -75,39 +77,69 @@ class DocsPublisher:
             return {"type": "workspace", "workspace": True}
         return {"type": "page_id", "page_id": PageRef.parse(parent).id}
 
-    def _ensure_page(self, state, doc, properties, report):
-        if doc.path in state.pages:
-            return
-        page = self._client.create_page(state.data_source_id, properties)
-        state.pages[doc.path] = {"id": page["id"], "hash": ""}
-        report.created += 1
+    @staticmethod
+    def _page_parent(page_id):
+        return {"type": "page_id", "page_id": page_id}
 
-    def _sync_page(self, state, doc, properties, body, report):
+    def _folder_chain(self, doc_path):
+        """Folder paths from the top down for a doc, e.g. ['a', 'a/b'] for 'a/b/x.md'."""
+        parts = posixpath.dirname(doc_path).split("/") if "/" in doc_path else []
+        return ["/".join(parts[:i + 1]) for i in range(len(parts))]
+
+    def _parent_for(self, state, doc_path):
+        chain = self._folder_chain(doc_path)
+        return state.folders[chain[-1]] if chain else state.root_id
+
+    def _ensure_page(self, state, doc, report):
+        parent_id = state.root_id
+        for folder in self._folder_chain(doc.path):
+            if folder not in state.folders:
+                name = posixpath.basename(folder).replace("-", " ").replace("_", " ").title()
+                state.folders[folder] = self._client.create_page(
+                    self._page_parent(parent_id), f"# {name}\n")["id"]
+                report.created += 1
+            parent_id = state.folders[folder]
+        if doc.path not in state.pages:
+            page = self._client.create_page(self._page_parent(parent_id), f"# {doc.title}\n")
+            state.pages[doc.path] = {"id": page["id"], "hash": ""}
+            report.created += 1
+
+    # -- content -------------------------------------------------------
+
+    @staticmethod
+    def _header(doc):
+        """A one-line summary of the front matter, since pages have no properties."""
+        parts = [f"**{label}:** {doc.meta[key]}" for key, label in _META_LABELS if doc.meta.get(key)]
+        return ("> " + " · ".join(parts) + "\n\n") if parts else ""
+
+    def _sync_page(self, state, doc, body, report):
         entry = state.pages[doc.path]
-        digest = hashlib.sha256(
-            json.dumps({"p": properties, "b": body}, sort_keys=True).encode()
-        ).hexdigest()
+        digest = hashlib.sha256(body.encode()).hexdigest()
         if entry["hash"] == digest:
             report.unchanged += 1
             return
         try:
-            self._write(entry["id"], properties, body)
+            self._client.replace_markdown(entry["id"], body)
         except NotionApiError as e:
             if e.status != 404:
                 raise
             # Page was deleted in Notion: recreate it and write again.
-            page = self._client.create_page(state.data_source_id, properties)
-            entry["id"] = page["id"]
-            self._write(entry["id"], properties, body)
+            parent_id = self._parent_for(state, doc.path)
+            entry["id"] = self._client.create_page(
+                self._page_parent(parent_id), f"# {doc.title}\n")["id"]
+            self._client.replace_markdown(entry["id"], body)
         entry["hash"] = digest
         report.updated += 1
 
-    def _write(self, page_id, properties, body):
-        self._client.update_page(page_id, properties=properties)
-        self._client.replace_markdown(page_id, body)
-
-    def _prune(self, state, current_paths, report):
-        for path in sorted(set(state.pages) - current_paths):
-            self._client.update_page(state.pages[path]["id"], in_trash=True)
+    def _prune(self, state, docs, report):
+        current = {d.path for d in docs}
+        needed_folders = {f for d in docs for f in self._folder_chain(d.path)}
+        for path in sorted(set(state.pages) - current):
+            self._client.trash_page(state.pages[path]["id"])
             del state.pages[path]
+            report.trashed += 1
+        # Deepest first, so a folder is never trashed before its subfolders.
+        for folder in sorted(set(state.folders) - needed_folders, reverse=True):
+            self._client.trash_page(state.folders[folder])
+            del state.folders[folder]
             report.trashed += 1

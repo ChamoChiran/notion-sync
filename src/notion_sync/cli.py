@@ -49,18 +49,22 @@ class Cli:
         edit.set_defaults(handler=self._edit)
 
         publish = sub.add_parser(
-            "publish", help="publish a folder of Markdown files into a Notion database"
+            "publish", help="publish a folder of Markdown files as a tree of Notion pages"
         )
         publish.add_argument("folder", help="docs folder to publish")
         publish.add_argument("--state", default="notion-map.json",
                              help="file mapping docs to Notion pages (commit it)")
-        publish.add_argument("--parent", help="Notion page URL, or 'workspace', to create the database under (first run only)")
-        publish.add_argument("--title", default="Docs", help="database title (first run only)")
-        publish.add_argument("--source-url",
-                             help="base URL of the files in git, stored in each page's Source property")
+        publish.add_argument("--parent",
+                             help="Notion page URL, or 'workspace', to create the root page under (first run only)")
+        publish.add_argument("--title", default="Docs", help="root page title (first run only)")
         publish.add_argument("--prune", action="store_true",
                              help="move pages whose file no longer exists to Notion's trash")
         publish.set_defaults(handler=self._publish)
+
+        trash = sub.add_parser("trash", help="move a page or database to Notion's trash")
+        trash.add_argument("ref", help="page or database URL or ID")
+        trash.add_argument("--database", action="store_true", help="the ref is a database, not a page")
+        trash.set_defaults(handler=self._trash)
 
         search = sub.add_parser("search", help="find pages the token can access")
         search.add_argument("query", nargs="?", default="", help="title text; omit to list all")
@@ -109,13 +113,16 @@ class Cli:
 
     def _publish(self, args):
         report = self._publisher_factory().publish(
-            args.folder, args.state, parent=args.parent, title=args.title,
-            source_base_url=args.source_url, prune=args.prune,
+            args.folder, args.state, parent=args.parent, title=args.title, prune=args.prune,
         )
         print(
             f"published: {report.created} created, {report.updated} updated, "
             f"{report.unchanged} unchanged, {report.trashed} trashed"
         )
+
+    def _trash(self, args):
+        self._service_factory().trash(PageRef.parse(args.ref), args.database)
+        print(f"moved {args.ref} to Notion's trash")
 
     def _search(self, args):
         for hit in self._service_factory().search(args.query):
