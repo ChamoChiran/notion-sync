@@ -40,8 +40,7 @@ notion-sync edit <page-url-or-id> -r "old text" "new text"   # change just that 
 Keep docs in git and mirror them into Notion as a tree of pages that follows the folders:
 
 ```
-Centric Docs            root page
-├─ Guide                README.md
+Centric Docs            root page: "Table of contents" (links to every page), then README.md
 ├─ Architecture         folder page
 │  ├─ Overview          architecture/00-overview.md
 │  └─ Components        folder page
@@ -56,6 +55,10 @@ notion-sync publish docs --parent workspace --title "Centric Docs"
 notion-sync publish docs --prune
 ```
 
+- The top-level `README.md` is not a page of its own: it becomes the root page's body, under a
+  `## Table of contents` heading and a nested list of links to every published page. The
+  folder pages stay attached to the root (the tool reads their tags back and rewrites them
+  with the new body so Notion does not delete them).
 - Git is the source of truth. Pages are overwritten on every change, so edit in git only.
 - `--parent` is a Notion page URL (a regular page, not a person profile) or `workspace`
   for a private top-level page. It is only used on the first run.

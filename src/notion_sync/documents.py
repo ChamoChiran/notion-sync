@@ -5,6 +5,12 @@ from pathlib import Path
 _H1_RE = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
 
 
+def folder_title(folder_path):
+    """Page title for a folder: its last path segment, spaced and title-cased."""
+    name = folder_path.rsplit("/", 1)[-1]
+    return name.replace("-", " ").replace("_", " ").title()
+
+
 @dataclass(frozen=True)
 class Document:
     """A Markdown file prepared for publishing.

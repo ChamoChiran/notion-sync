@@ -14,12 +14,14 @@ class PublishState:
     def __init__(self, path):
         self._path = Path(path)
         self.root_id = None
+        self.root_hash = ""  # hash of the root page body (table of contents + README)
         self.folders = {}  # folder path -> page id
         self.pages = {}  # doc path -> {"id": ..., "hash": ...}
         if self._path.exists():
             data = json.loads(self._path.read_text(encoding="utf-8"))
             if data.get("version") == STATE_VERSION:
                 self.root_id = data.get("root_id")
+                self.root_hash = data.get("root_hash", "")
                 self.folders = data.get("folders", {})
                 self.pages = data.get("pages", {})
 
@@ -30,6 +32,7 @@ class PublishState:
         data = {
             "version": STATE_VERSION,
             "root_id": self.root_id,
+            "root_hash": self.root_hash,
             "folders": dict(sorted(self.folders.items())),
             "pages": dict(sorted(self.pages.items())),
         }
