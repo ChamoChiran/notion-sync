@@ -1,12 +1,17 @@
 # notion-sync
 
-Read and update Notion pages from Markdown files. Pure standard library, Python 3.9+.
+Read and update Notion pages as Markdown from the command line. Built on Notion's native
+page Markdown API (`Notion-Version: 2026-03-11`). Pure standard library, Python 3.9+.
 
 ## Setup
 
-1. Create an internal integration at <https://www.notion.so/profile/integrations> and copy its token.
-2. On the Notion page, open `...` → **Connections** and add the integration.
-3. Install and set the token:
+Pick one kind of token and put it in `NOTION_TOKEN`:
+
+- **Personal access token** (simplest): Developer portal → *Personal access tokens* →
+  *New token*. Acts as you, so no page sharing needed. On the Free plan only workspace
+  owners can create one.
+- **Internal integration**: <https://www.notion.so/profile/integrations>. Then on each page
+  open `...` → **Connections** and add the integration.
 
 ```powershell
 py -m pip install -e .
@@ -16,22 +21,28 @@ $env:NOTION_TOKEN = "secret_xxx"
 ## Usage
 
 ```powershell
-notion-sync search "meeting"              # list pages shared with the integration
-notion-sync pull <page-url-or-id> -o doc.md
-notion-sync push doc.md <page-url-or-id>  # replaces the page content in place
+notion-sync search "meeting"                       # find pages the token can access
+notion-sync pull <page-url-or-id> -o doc.md        # read a page as Markdown
+notion-sync push doc.md <page-url-or-id>           # replace the whole page body
+notion-sync edit <page-url-or-id> -r "old text" "new text"   # change just that text
 ```
 
-Without installing: `py -m notion_sync ...` from `src/`.
+- `push` replaces content in place; page ID, URL and sharing stay the same. It refuses to
+  delete child pages or databases unless you pass `--allow-deleting-content`.
+- `edit` takes `-r OLD NEW` (repeatable). `OLD` must match exactly one place, unless `--all`.
+  Everything else on the page is untouched, so it is the safest way to make small changes.
+- Pull right before editing: `push` overwrites changes made in Notion in between.
+- Without installing: `py -m notion_sync ...` with `PYTHONPATH=src`.
 
-`push` keeps the page ID, URL and sharing; it replaces the blocks inside. Pull right
-before editing, since edits made in Notion in between are overwritten.
+## Limits
 
-## Supported Markdown
-
-Headings (1-3), paragraphs, bulleted / numbered / to-do lists (nested), quotes, fenced
-code, dividers, and inline **bold**, *italic*, `code`, ~~strike~~, links.
-Tables, images, embeds and databases are not supported: `pull` emits an
-`<!-- unsupported block -->` comment and `push` drops it.
+- Large writes (over ~5,000 blocks) are rejected by Notion; split the content. Async writes
+  (`allow_async`) are not supported yet.
+- Pages over ~20,000 blocks, or with content the token cannot see, come back truncated;
+  `pull` prints a warning.
+- Bookmarks, embeds and link previews appear as `<unknown>` tags and are not editable as Markdown.
+- Synced pages cannot be updated.
+- Notion separates top-level blocks with a single newline and uses `<br>` for line breaks.
 
 ## Layout
 
@@ -39,12 +50,10 @@ Tables, images, embeds and databases are not supported: `pull` emits an
 |---|---|---|
 | `config.py` | `Config` | token and API version from environment |
 | `page_ref.py` | `PageRef` | parse a page URL or ID |
-| `client.py` | `NotionClient` | HTTP, retry/backoff, pagination |
-| `richtext.py` | `InlineParser`, `RichTextRenderer` | inline Markdown ↔ rich text |
-| `parser.py` | `MarkdownParser` | Markdown → Notion blocks |
-| `renderer.py` | `MarkdownRenderer` | Notion blocks → Markdown |
-| `service.py` | `PageSyncService` | pull / push / search use cases |
+| `client.py` | `NotionClient` | HTTP, auth, retry/backoff, Markdown endpoints |
+| `service.py` | `PageSyncService` | pull / push / edit / search use cases |
 | `cli.py` | `Cli` | argument parsing and output |
+| `errors.py` | `NotionSyncError` + subclasses | user-facing errors |
 
 ## Tests
 

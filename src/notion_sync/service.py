@@ -1,14 +1,11 @@
-from dataclasses import dataclass
-
-from .parser import MarkdownParser
-from .renderer import MarkdownRenderer
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
-class PushResult:
-    page_id: str
-    blocks_written: int
-    blocks_removed: int
+class PagePull:
+    markdown: str
+    truncated: bool = False
+    unknown_block_ids: list = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -19,24 +16,26 @@ class SearchHit:
 
 
 class PageSyncService:
-    """Application logic: pull a page to Markdown, push Markdown into a page."""
+    """Application logic: pull a page as Markdown, replace it, or patch parts of it."""
 
-    def __init__(self, client, parser=None, renderer=None):
+    def __init__(self, client):
         self._client = client
-        self._parser = parser or MarkdownParser()
-        self._renderer = renderer or MarkdownRenderer(client.list_children)
 
     def pull(self, page):
-        return self._renderer.render(self._client.list_children(page.id))
+        res = self._client.get_markdown(page.id)
+        return PagePull(
+            markdown=res["markdown"],
+            truncated=res.get("truncated", False),
+            unknown_block_ids=res.get("unknown_block_ids", []),
+        )
 
-    def push(self, page, markdown):
-        """Replace the page's content in place; the page ID and URL are unchanged."""
-        blocks = self._parser.parse(markdown)
-        existing = self._client.list_children(page.id)
-        for block in existing:
-            self._client.delete_block(block["id"])
-        self._client.append_children(page.id, blocks)
-        return PushResult(page.id, len(blocks), len(existing))
+    def push(self, page, markdown, allow_deleting_content=False):
+        """Replace the page body in place; the page ID and URL are unchanged."""
+        self._client.replace_markdown(page.id, markdown, allow_deleting_content)
+
+    def edit(self, page, replacements, replace_all=False):
+        """Apply (old, new) text replacements without touching the rest of the page."""
+        self._client.update_markdown(page.id, replacements, replace_all)
 
     def search(self, query):
         return [self._to_hit(p) for p in self._client.search_pages(query)]

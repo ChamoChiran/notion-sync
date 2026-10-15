@@ -1,20 +1,21 @@
 import json
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 
 from .config import Config
 from .errors import NotionApiError
 
 API_BASE = "https://api.notion.com/v1"
-RETRY_STATUSES = (429, 502, 503, 529)
+RETRY_STATUSES = (429, 500, 502, 503, 504, 529)
 MAX_ATTEMPTS = 6
-APPEND_BATCH_SIZE = 100
 
 
 class NotionClient:
-    """Thin Notion REST client: auth, retry/backoff, and pagination."""
+    """Notion REST client for the page Markdown endpoints, search and auth.
+
+    Handles auth headers and retry/backoff on rate limits and server errors.
+    """
 
     def __init__(self, config, opener=urllib.request.urlopen, sleep=time.sleep):
         self._config = config
@@ -47,32 +48,31 @@ class NotionClient:
                     e.code, method, path, e.read().decode(errors="replace")
                 ) from None
 
-    # -- blocks --------------------------------------------------------
+    # -- page markdown -------------------------------------------------
 
-    def list_children(self, block_id):
-        results, cursor = [], None
-        while True:
-            params = {"page_size": 100}
-            if cursor:
-                params["start_cursor"] = cursor
-            page = self._request(
-                "GET", f"/blocks/{block_id}/children?{urllib.parse.urlencode(params)}"
-            )
-            results += page["results"]
-            if not page["has_more"]:
-                return results
-            cursor = page["next_cursor"]
+    def get_markdown(self, page_id):
+        """Return the raw `page_markdown` object for a page (or an unknown block ID)."""
+        return self._request("GET", f"/pages/{page_id}/markdown")
 
-    def append_children(self, block_id, blocks):
-        for i in range(0, len(blocks), APPEND_BATCH_SIZE):
-            self._request(
-                "PATCH",
-                f"/blocks/{block_id}/children",
-                {"children": blocks[i:i + APPEND_BATCH_SIZE]},
-            )
+    def replace_markdown(self, page_id, markdown, allow_deleting_content=False):
+        body = {
+            "type": "replace_content",
+            "replace_content": {"new_str": markdown},
+        }
+        if allow_deleting_content:
+            body["replace_content"]["allow_deleting_content"] = True
+        return self._request("PATCH", f"/pages/{page_id}/markdown", body)
 
-    def delete_block(self, block_id):
-        self._request("DELETE", f"/blocks/{block_id}")
+    def update_markdown(self, page_id, replacements, replace_all_matches=False):
+        """Apply search-and-replace edits. `replacements` is a list of (old, new) pairs."""
+        updates = []
+        for old, new in replacements:
+            update = {"old_str": old, "new_str": new}
+            if replace_all_matches:
+                update["replace_all_matches"] = True
+            updates.append(update)
+        body = {"type": "update_content", "update_content": {"content_updates": updates}}
+        return self._request("PATCH", f"/pages/{page_id}/markdown", body)
 
     # -- search --------------------------------------------------------
 

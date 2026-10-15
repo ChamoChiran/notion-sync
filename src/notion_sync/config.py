@@ -3,11 +3,14 @@ from dataclasses import dataclass
 
 from .errors import ConfigError
 
-DEFAULT_NOTION_VERSION = "2022-06-28"
+# First API version with the native page Markdown endpoints.
+DEFAULT_NOTION_VERSION = "2026-03-11"
 
 
 @dataclass(frozen=True)
 class Config:
+    """Credentials and API version. The token may be an integration token or a PAT."""
+
     token: str
     notion_version: str = DEFAULT_NOTION_VERSION
 
