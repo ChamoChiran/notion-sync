@@ -73,6 +73,7 @@ class FakeClient:
         self.calls = []
         self.n = 0
         self.fail_404_for = set()
+        self.fail_archived_for = set()
         self.titles = {}
         self.children = {}  # parent page id -> [child page ids]
 
@@ -88,6 +89,8 @@ class FakeClient:
     def set_title(self, pid, title=None):
         if pid in self.fail_404_for:
             raise NotionApiError(404, "PATCH", "/x", "{}")
+        if pid in self.fail_archived_for:
+            raise NotionApiError(400, "PATCH", "/x", '{"code": "validation_error", "message": "Cannot edit block that is archived."}')
         if title is not None:
             self.titles[pid] = title
         self.calls.append(("set_title", pid, title))
@@ -288,6 +291,20 @@ class PublisherTests(unittest.TestCase):
         # the recreated page, its "Next" neighbour, and the root's table of contents (the
         # folder that lists it was written earlier in the run and catches up on the next one)
         self.assertEqual(report.updated, 3)
+
+    def test_page_moved_to_trash_in_notion_is_recreated(self):
+        with tempfile.TemporaryDirectory() as d:
+            root, state = self.make_root(d), Path(d) / "map.json"
+            DocsPublisher(FakeClient()).publish(root, state, parent=PARENT)
+            before = PublishState(state)
+            old = before.pages["architecture/a.md"]["id"]
+            (root / "architecture" / "a.md").write_text("# A\n\nedited\n", encoding="utf-8")
+            client = FakeClient()
+            client.fail_archived_for = {old}
+            client.children[before.root_id] = [before.folders["architecture"]]
+            DocsPublisher(client).publish(root, state)
+            after = PublishState(state)
+        self.assertNotEqual(old, after.pages["architecture/a.md"]["id"])
 
     def test_every_page_gets_a_title(self):
         """Regression: pages created without an explicit title show as 'Untitled' in Notion."""

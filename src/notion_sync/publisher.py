@@ -61,6 +61,11 @@ class _Run:
         return layout.footer(previous, following, home if show_home else None)
 
 
+def _page_is_gone(error):
+    """True when Notion says the page no longer exists (404) or is in the trash (400, "archived")."""
+    return error.status == 404 or (error.status == 400 and "archived" in str(error).lower())
+
+
 class DocsPublisher:
     """Publishes a folder of Markdown files as a tree of Notion pages.
 
@@ -188,9 +193,9 @@ class DocsPublisher:
         try:
             self._write(page["id"], doc.title, text)
         except NotionApiError as e:
-            if e.status != 404:
+            if not _page_is_gone(e):
                 raise
-            # Page was deleted in Notion: recreate it and write again.
+            # Page was deleted or moved to the trash in Notion: recreate it and write again.
             parent = self._page_parent(self._parent_id(state, doc.path))
             page["id"] = self._client.create_page(parent, doc.title)["id"]
             self._write(page["id"], doc.title, text)
