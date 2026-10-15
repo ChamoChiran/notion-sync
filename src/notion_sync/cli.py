@@ -47,7 +47,7 @@ class Cli:
         edit.set_defaults(handler=self._edit)
 
         search = sub.add_parser("search", help="find pages the token can access")
-        search.add_argument("query")
+        search.add_argument("query", nargs="?", default="", help="title text; omit to list all")
         search.set_defaults(handler=self._search)
         return parser
 
