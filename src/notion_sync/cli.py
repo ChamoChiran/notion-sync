@@ -54,7 +54,7 @@ class Cli:
         publish.add_argument("folder", help="docs folder to publish")
         publish.add_argument("--state", default="notion-map.json",
                              help="file mapping docs to Notion pages (commit it)")
-        publish.add_argument("--parent", help="Notion page URL to create the database under (first run only)")
+        publish.add_argument("--parent", help="Notion page URL, or 'workspace', to create the database under (first run only)")
         publish.add_argument("--title", default="Docs", help="database title (first run only)")
         publish.add_argument("--source-url",
                              help="base URL of the files in git, stored in each page's Source property")

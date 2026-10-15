@@ -76,10 +76,14 @@ class NotionClient:
 
     # -- databases and pages -------------------------------------------
 
-    def create_database(self, parent_page_id, title, properties):
-        """Create a database under a page; returns the object (with `data_sources`)."""
+    def create_database(self, parent, title, properties):
+        """Create a database; returns the object (with `data_sources`).
+
+        `parent` is a Notion parent object: a page (`{"type": "page_id", ...}`) or the
+        workspace (`{"type": "workspace", "workspace": True}`).
+        """
         return self._request("POST", "/databases", {
-            "parent": {"type": "page_id", "page_id": parent_page_id},
+            "parent": parent,
             "title": [{"type": "text", "text": {"content": title}}],
             "initial_data_source": {"properties": properties},
         })

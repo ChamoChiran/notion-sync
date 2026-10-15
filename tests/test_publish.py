@@ -130,6 +130,8 @@ class PublisherTests(unittest.TestCase):
             report = DocsPublisher(client).publish(root, state, parent=PARENT, title="Docs")
             saved = json.loads(state.read_text(encoding="utf-8"))
         self.assertEqual((report.created, report.updated, report.unchanged), (2, 2, 0))
+        self.assertEqual(self.names(client, "create_database")[0][1],
+                         {"type": "page_id", "page_id": PARENT})
         self.assertEqual(saved["data_source_id"], "ds-1")
         self.assertEqual(set(saved["pages"]), {"architecture/a.md", "architecture/b.md"})
         a_body = next(c[2] for c in self.names(client, "replace")
@@ -148,6 +150,13 @@ class PublisherTests(unittest.TestCase):
             (root / "architecture" / "b.md").write_text("# B\n\nchanged\n", encoding="utf-8")
             report = DocsPublisher(client).publish(root, state)
         self.assertEqual((report.updated, report.unchanged), (1, 1))
+
+    def test_workspace_parent(self):
+        with tempfile.TemporaryDirectory() as d:
+            client = FakeClient()
+            DocsPublisher(client).publish(self.make_root(d), Path(d) / "m.json", parent="Workspace")
+        self.assertEqual(self.names(client, "create_database")[0][1],
+                         {"type": "workspace", "workspace": True})
 
     def test_requires_parent_on_first_run(self):
         with tempfile.TemporaryDirectory() as d:

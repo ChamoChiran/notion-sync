@@ -59,13 +59,21 @@ class DocsPublisher:
         if state.data_source_id:
             return
         if not parent:
-            raise ConfigError("no database yet: pass --parent <Notion page URL> for the first run")
+            raise ConfigError(
+                "no database yet: pass --parent <Notion page URL> (or 'workspace') for the first run"
+            )
         db = self._client.create_database(
-            PageRef.parse(parent).id, title, DocsDatabaseSchema.properties()
+            self._parent_object(parent), title, DocsDatabaseSchema.properties()
         )
         state.database_id = db["id"]
         state.data_source_id = db["data_sources"][0]["id"]
         state.save()
+
+    @staticmethod
+    def _parent_object(parent):
+        if parent.strip().lower() == "workspace":
+            return {"type": "workspace", "workspace": True}
+        return {"type": "page_id", "page_id": PageRef.parse(parent).id}
 
     def _ensure_page(self, state, doc, properties, report):
         if doc.path in state.pages:

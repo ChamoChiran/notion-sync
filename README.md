@@ -47,6 +47,7 @@ notion-sync publish docs --parent <notion-page-url> --title "Centric Docs" `
 notion-sync publish docs --prune
 ```
 
+- `--parent workspace` creates the database at the top level of your workspace (private to the token owner until you move or share it); a page URL must be a regular page, not a person profile.
 - Git is the source of truth. Pages are overwritten on every change, so edit in git only.
 - `notion-map.json` (path → page id, content hash) is written next to where you run the
   command. **Commit it**, so every run updates the same pages.
