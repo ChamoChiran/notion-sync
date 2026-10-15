@@ -74,6 +74,30 @@ class NotionClient:
         body = {"type": "update_content", "update_content": {"content_updates": updates}}
         return self._request("PATCH", f"/pages/{page_id}/markdown", body)
 
+    # -- databases and pages -------------------------------------------
+
+    def create_database(self, parent_page_id, title, properties):
+        """Create a database under a page; returns the object (with `data_sources`)."""
+        return self._request("POST", "/databases", {
+            "parent": {"type": "page_id", "page_id": parent_page_id},
+            "title": [{"type": "text", "text": {"content": title}}],
+            "initial_data_source": {"properties": properties},
+        })
+
+    def create_page(self, data_source_id, properties):
+        return self._request("POST", "/pages", {
+            "parent": {"type": "data_source_id", "data_source_id": data_source_id},
+            "properties": properties,
+        })
+
+    def update_page(self, page_id, properties=None, in_trash=None):
+        body = {}
+        if properties is not None:
+            body["properties"] = properties
+        if in_trash is not None:
+            body["in_trash"] = in_trash
+        return self._request("PATCH", f"/pages/{page_id}", body)
+
     # -- search --------------------------------------------------------
 
     def search_pages(self, query):
