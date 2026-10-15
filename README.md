@@ -54,7 +54,7 @@ notion-sync publish docs --prune
 
   ```markdown
   ---
-  type: Architecture        # default comes from the folder (architecture/decisions → ADR)
+  type: Architecture
   status: Draft
   owner: Name
   component: Backend API
@@ -63,8 +63,10 @@ notion-sync publish docs --prune
   # Page title
   ```
 
-  The first `# ` heading becomes the page title (not repeated in the body). Database
-  columns: Name, Type, Component, Status, Owner, Last reviewed, Source, Path.
+  All keys are optional and flat (`key: value`, no inline comments). `type` defaults from
+  the folder (`architecture/decisions/` → ADR, `runbooks/` → Runbook, and so on). The first
+  `# ` heading becomes the page title (not repeated in the body). Database columns: Name,
+  Type, Component, Status, Owner, Last reviewed, Source, Path.
 - Relative links between `.md` files are rewritten to Notion page links; links to files that
   aren't published stay as they are.
 - `--prune` moves pages whose file was deleted to Notion's trash (recoverable there).
