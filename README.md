@@ -66,9 +66,7 @@ notion-sync publish docs --prune
   run the command. **Commit it**, so every run updates the same pages. A map from an older
   layout is ignored and rebuilt.
 - Pages cannot hold properties, so optional front matter (`status`, `owner`, `component`,
-  `last_reviewed`) is shown as a callout at the top of each page, coloured by status
-  (green: Accepted/Approved/Active/Final/Stable, yellow: Draft/Proposed, red:
-  Deprecated/Superseded/Rejected, grey otherwise). Keep it flat (`key: value`, no inline
+  `last_reviewed`) is shown as a one-line quote at the top of each page. Keep it flat (`key: value`, no inline
   comments):
 
   ```markdown
@@ -77,7 +75,6 @@ notion-sync publish docs --prune
   owner: Name
   last_reviewed: 2026-10-15
   order: 2
-  icon: 🧭
   ---
   # Page title
   ```
@@ -96,9 +93,6 @@ notion-sync publish docs --prune
   Without one, the folder page is just the list.
 - **On this page**: pages with three or more `##`/`###` headings get Notion's table of
   contents block after the header.
-- **Icons**: the root is 📚, folders get an emoji by name (`architecture`, `runbooks`,
-  `decisions`, ...; 📁 otherwise), documents get 📄. Set `icon:` in front matter to
-  override.
 - **Links**: relative `.md` links become Notion page links, `folder/` links become the
   folder page, and a link to a folder's `index.md` goes to the folder page. With
   `--source-url https://github.com/org/repo/blob/main`, links to other files inside the
@@ -115,7 +109,7 @@ notion-sync publish docs --prune
 - A changed title in git renames the page. Not handled: moving a file (a moved file
   becomes a new page; use `--prune` to trash the old one).
 - Upgrading from 0.4: the map file stays compatible. The first run rewrites every page once
-  (new header and footer) and adds icons.
+  (new header and footer) and clears page icons: published pages carry none.
 
 `notion-sync trash <page-url-or-id> [--database]` moves a page or database to Notion's trash.
 
@@ -139,7 +133,7 @@ notion-sync publish docs --prune
 | `service.py` | `PageSyncService` | pull / push / edit / search use cases |
 | `publisher.py` | `DocsPublisher` | publish a folder as a page tree |
 | `nav.py` | `Navigation` | reading order, folder landing pages |
-| `layout.py` | | breadcrumb, footer, callout, icons |
+| `layout.py` | | breadcrumb, footer, summary line |
 | `links.py` | `LinkRewriter` | resolve relative links, collect warnings |
 | `cli.py` | `Cli` | argument parsing and output |
 | `errors.py` | `NotionSyncError` + subclasses | user-facing errors |

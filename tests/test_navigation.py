@@ -3,8 +3,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from notion_sync.client import NotionClient
+from notion_sync.config import Config
 from notion_sync.documents import Document
-from notion_sync.layout import callout, footer, wants_toc
+from notion_sync.layout import footer, summary, wants_toc
 from notion_sync.links import LinkRewriter, notion_url
 from notion_sync.nav import Navigation, split_indexes
 from notion_sync.publisher import DocsPublisher
@@ -14,6 +16,32 @@ from test_publish import PARENT, FakeClient
 
 def url(page_id):
     return notion_url(page_id)
+
+
+class ClientIconTests(unittest.TestCase):
+    def test_set_title_clears_any_icon(self):
+        sent = []
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return b"{}"
+
+        def opener(request):
+            sent.append(json.loads(request.data))
+            return Response()
+
+        client = NotionClient(Config("token"), opener=opener)
+        client.set_title("page", "Title")
+        client.set_title("page")
+        self.assertEqual(sent[0]["icon"], None)
+        self.assertIn("properties", sent[0])
+        self.assertEqual(sent[1], {"icon": None})
 
 
 class SplitIndexTests(unittest.TestCase):
@@ -48,11 +76,9 @@ class NavigationTests(unittest.TestCase):
 
 
 class LayoutTests(unittest.TestCase):
-    def test_callout_colour_follows_status(self):
-        self.assertIn('icon="🟢" color="green_bg"', callout({"status": "Accepted"}))
-        self.assertIn('icon="🔴" color="red_bg"', callout({"status": "Deprecated"}))
-        self.assertIn('icon="📝" color="gray_bg"', callout({"owner": "Me"}))
-        self.assertEqual(callout({"title": "x"}), "")
+    def test_summary_is_a_plain_quote_without_icons(self):
+        self.assertEqual(summary({"status": "Draft", "owner": "Me"}), "> **Status:** Draft · **Owner:** Me")
+        self.assertEqual(summary({"title": "x"}), "")
 
     def test_footer_parts(self):
         self.assertEqual(footer(("P", "u1"), ("N", "u2"), "h"),
@@ -98,7 +124,7 @@ class PublishNavigationTests(unittest.TestCase):
         (root / "README.md").write_text("# Home\n\nwelcome\n", encoding="utf-8")
         (root / "intro.md").write_text("# Intro\n\nsee [guide](guide/)\n", encoding="utf-8")
         (root / "guide" / "index.md").write_text(
-            "---\nicon: 🧭\n---\n\n# The Guide\n\nStart here, then [two](two.md).\n", encoding="utf-8")
+            "# The Guide\n\nStart here, then [two](two.md).\n", encoding="utf-8")
         (root / "guide" / "one.md").write_text("---\norder: 1\n---\n\n# One\n\ntext\n", encoding="utf-8")
         (root / "guide" / "two.md").write_text("---\norder: 2\n---\n\n# Two\n\n[home](../README.md)\n",
                                                encoding="utf-8")
@@ -146,7 +172,6 @@ class PublishNavigationTests(unittest.TestCase):
         self.assertIn("## In this section\n\n- [One](%s)\n- [Two](%s)" % (
             url(saved["pages"]["guide/one.md"]["id"]), url(saved["pages"]["guide/two.md"]["id"])), body)
         self.assertEqual(client.titles[guide], "The Guide")
-        self.assertEqual(client.icons[guide], "🧭")
         self.assertNotIn("guide/index.md", saved["pages"])  # no page of its own
         # intro links to the folder page, not a dead relative path
         self.assertIn("(%s)" % url(guide), bodies[saved["pages"]["intro.md"]["id"]])
@@ -165,12 +190,6 @@ class PublishNavigationTests(unittest.TestCase):
             body = {c[1]: c[2] for c in client.calls if c[0] == "replace"}[guide]
         one = state.pages["guide/one.md"]["id"].replace("-", "")
         self.assertTrue(body.rstrip().endswith('<page url="https://www.notion.so/%s">One</page>' % one))
-
-    def test_icons_default_by_section_and_doc(self):
-        with tempfile.TemporaryDirectory() as d:
-            client, saved, _, _ = self.publish(d)
-        self.assertEqual(client.icons[saved["root_id"]], "📚")
-        self.assertEqual(client.icons[saved["pages"]["intro.md"]["id"]], "📄")
 
     def test_toc_block_only_on_long_pages(self):
         with tempfile.TemporaryDirectory() as d:

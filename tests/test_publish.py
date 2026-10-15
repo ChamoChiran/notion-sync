@@ -74,25 +74,22 @@ class FakeClient:
         self.n = 0
         self.fail_404_for = set()
         self.titles = {}
-        self.icons = {}
         self.children = {}  # parent page id -> [child page ids]
 
-    def create_page(self, parent, title, icon=None):
+    def create_page(self, parent, title):
         self.n += 1
         pid = f"00000000-0000-0000-0000-{self.n:012d}"
         self.titles[pid] = title
-        self.icons[pid] = icon
         if parent.get("type") == "page_id":
             self.children.setdefault(parent["page_id"], []).append(pid)
         self.calls.append(("create_page", parent, title, pid))
         return {"id": pid}
 
-    def set_title(self, pid, title=None, icon=None):
+    def set_title(self, pid, title=None):
         if pid in self.fail_404_for:
             raise NotionApiError(404, "PATCH", "/x", "{}")
         if title is not None:
             self.titles[pid] = title
-        self.icons[pid] = icon
         self.calls.append(("set_title", pid, title))
 
     def get_markdown(self, pid):
@@ -197,8 +194,7 @@ class PublisherTests(unittest.TestCase):
             saved = json.loads(state.read_text(encoding="utf-8"))
         bodies = self.replaced(client)
         a_id = saved["pages"]["architecture/a.md"]["id"]
-        self.assertIn('<callout icon="🟡" color="yellow_bg">\n\t**Status:** Draft · **Owner:** Me\n</callout>',
-                      bodies[a_id])
+        self.assertIn("> **Status:** Draft · **Owner:** Me", bodies[a_id])
         c2 = bodies[saved["pages"]["architecture/c2.md"]["id"]]
         self.assertIn("https://www.notion.so/" + a_id.replace("-", ""), c2)
         self.assertIn("https://www.notion.so/" + saved["root_id"].replace("-", ""), c2)  # README -> root

@@ -131,7 +131,7 @@ class DocsPublisher:
             )
         state.root_title = title or DEFAULT_TITLE
         state.root_id = self._client.create_page(
-            self._parent_object(parent), state.root_title, layout.ROOT_ICON)["id"]
+            self._parent_object(parent), state.root_title)["id"]
         state.save()
 
     @staticmethod
@@ -145,12 +145,6 @@ class DocsPublisher:
         return {"type": "page_id", "page_id": page_id}
 
     @staticmethod
-    def _icon(entry):
-        if entry.kind == "doc":
-            return layout.doc_icon(entry.obj)
-        return layout.folder_icon(entry.path, entry.obj.index)
-
-    @staticmethod
     def _parent_id(state, path):
         """Id of the page holding `path`: its closest folder, or the root."""
         chain = ancestors(path)
@@ -161,7 +155,7 @@ class DocsPublisher:
         if entry.path in known:
             return
         page = self._client.create_page(
-            self._page_parent(self._parent_id(state, entry.path)), entry.title, self._icon(entry))
+            self._page_parent(self._parent_id(state, entry.path)), entry.title)
         if entry.kind == "folder":
             state.folders[entry.path] = page["id"]
         else:
@@ -182,25 +176,24 @@ class DocsPublisher:
         page = state.pages[doc.path]
         text = layout.join_blocks(
             layout.breadcrumb(run.crumbs(doc.path)),
-            layout.callout(doc.meta),
+            layout.summary(doc.meta),
             layout.TOC_BLOCK if layout.wants_toc(doc.body) else "",
             run.links.rewrite(doc.body, doc.path),
             run.footer(entry),
         )
-        icon = self._icon(entry)
-        digest = self._digest(doc.title, icon, text)
+        digest = self._digest(doc.title, text)
         if page["hash"] == digest:
             run.report.unchanged += 1
             return
         try:
-            self._write(page["id"], doc.title, icon, text)
+            self._write(page["id"], doc.title, text)
         except NotionApiError as e:
             if e.status != 404:
                 raise
             # Page was deleted in Notion: recreate it and write again.
             parent = self._page_parent(self._parent_id(state, doc.path))
-            page["id"] = self._client.create_page(parent, doc.title, icon)["id"]
-            self._write(page["id"], doc.title, icon, text)
+            page["id"] = self._client.create_page(parent, doc.title)["id"]
+            self._write(page["id"], doc.title, text)
         page["hash"] = digest
         run.report.updated += 1
 
@@ -211,17 +204,16 @@ class DocsPublisher:
         listing += [f"- [{s.title}]({run.url('folder', s.path)})" for s in section.sections]
         text = layout.join_blocks(
             layout.breadcrumb(run.crumbs(section.path)),
-            layout.callout(index.meta) if index else "",
+            layout.summary(index.meta) if index else "",
             run.links.rewrite(index.body, index.path) if index else "",
             "## In this section\n\n" + "\n".join(listing),
             run.footer(entry),
         )
-        icon = self._icon(entry)
-        digest = self._digest(entry.title, icon, text)
+        digest = self._digest(entry.title, text)
         if state.folder_hashes.get(section.path) == digest:
             run.report.unchanged += 1
             return
-        self._write(state.folders[section.path], entry.title, icon, text, keep_children=True)
+        self._write(state.folders[section.path], entry.title, text, keep_children=True)
         state.folder_hashes[section.path] = digest
         run.report.updated += 1
 
@@ -233,20 +225,20 @@ class DocsPublisher:
             blocks.append(f"## {readme.title}\n\n" + run.links.rewrite(readme.body, readme.path).strip())
         blocks.append(run.footer(entry))
         text = layout.join_blocks(*blocks)
-        digest = self._digest(state.root_title, layout.ROOT_ICON, text)
+        digest = self._digest(state.root_title, text)
         if state.root_hash == digest:
             run.report.unchanged += 1
             return
         # An unknown title (state from an older version, no --title given) is left alone.
-        self._write(state.root_id, state.root_title or None, layout.ROOT_ICON, text, keep_children=True)
+        self._write(state.root_id, state.root_title or None, text, keep_children=True)
         state.root_hash = digest
         run.report.updated += 1
 
     @staticmethod
-    def _digest(title, icon, text):
-        return hashlib.sha256(f"{title}\n{icon}\n{text}".encode()).hexdigest()
+    def _digest(title, text):
+        return hashlib.sha256(f"{title}\n{text}".encode()).hexdigest()
 
-    def _write(self, page_id, title, icon, text, keep_children=False):
+    def _write(self, page_id, title, text, keep_children=False):
         if keep_children:
             # Replacing the body would delete the page's child pages, so read their tags
             # back and keep them in the new text.
@@ -254,7 +246,7 @@ class DocsPublisher:
             children = _CHILD_PAGE_RE.findall(current)
             if children:
                 text = text.rstrip("\n") + "\n\n" + "\n".join(children) + "\n"
-        self._client.set_title(page_id, title, icon)  # also picks up a renamed title
+        self._client.set_title(page_id, title)  # also picks up a renamed title
         self._client.replace_markdown(page_id, text)
 
     def _prune(self, state, pages, nav, report):

@@ -1,14 +1,6 @@
-"""Page furniture around a document's body: breadcrumb, status callout, footer, icons."""
-import posixpath
+"""Page furniture around a document's body: breadcrumb, summary line, footer."""
 import re
 
-ROOT_ICON = "📚"
-DOC_ICON = "📄"
-FOLDER_ICON = "📁"
-SECTION_ICONS = {
-    "architecture": "🏗️", "onboarding": "🚀", "runbooks": "📟", "policies": "📜",
-    "templates": "🧩", "decisions": "⚖️", "components": "🧱", "flows": "🔀",
-}
 TOC_BLOCK = "<table_of_contents/>"
 _TOC_MIN_HEADINGS = 3
 
@@ -18,34 +10,14 @@ _META_LABELS = (
     ("component", "Component"),
     ("last_reviewed", "Last reviewed"),
 )
-_STATUS_STYLES = (
-    (("draft", "proposed", "wip"), ("🟡", "yellow_bg")),
-    (("accepted", "active", "approved", "final", "stable"), ("🟢", "green_bg")),
-    (("deprecated", "superseded", "rejected", "retired"), ("🔴", "red_bg")),
-)
-_DEFAULT_STYLE = ("📝", "gray_bg")
 _HEADING_RE = re.compile(r"^#{2,3}\s+\S")
 _FENCE_RE = re.compile(r"^\s*(```|~~~)")
 
 
-def doc_icon(doc):
-    return doc.meta.get("icon") or DOC_ICON
-
-
-def folder_icon(path, index):
-    if index and index.meta.get("icon"):
-        return index.meta["icon"]
-    return SECTION_ICONS.get(posixpath.basename(path).lower(), FOLDER_ICON)
-
-
-def callout(meta):
-    """The front matter summary (status, owner, ...) as a coloured Notion callout."""
+def summary(meta):
+    """The front matter (status, owner, ...) as a one-line quote, since pages have no properties."""
     parts = [f"**{label}:** {meta[key]}" for key, label in _META_LABELS if meta.get(key)]
-    if not parts:
-        return ""
-    status = meta.get("status", "").strip().lower()
-    icon, color = next((style for names, style in _STATUS_STYLES if status in names), _DEFAULT_STYLE)
-    return f'<callout icon="{icon}" color="{color}">\n\t{" · ".join(parts)}\n</callout>'
+    return "> " + " · ".join(parts) if parts else ""
 
 
 def link(title, url):
