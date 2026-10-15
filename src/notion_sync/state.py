@@ -15,14 +15,18 @@ class PublishState:
         self._path = Path(path)
         self.root_id = None
         self.root_hash = ""  # hash of the root page body (table of contents + README)
+        self.root_title = ""  # the root page's title, used in breadcrumbs
         self.folders = {}  # folder path -> page id
+        self.folder_hashes = {}  # folder path -> hash of the last body written
         self.pages = {}  # doc path -> {"id": ..., "hash": ...}
         if self._path.exists():
             data = json.loads(self._path.read_text(encoding="utf-8"))
             if data.get("version") == STATE_VERSION:
                 self.root_id = data.get("root_id")
                 self.root_hash = data.get("root_hash", "")
+                self.root_title = data.get("root_title", "")
                 self.folders = data.get("folders", {})
+                self.folder_hashes = data.get("folder_hashes", {})
                 self.pages = data.get("pages", {})
 
     def page_ids(self):
@@ -33,7 +37,9 @@ class PublishState:
             "version": STATE_VERSION,
             "root_id": self.root_id,
             "root_hash": self.root_hash,
+            "root_title": self.root_title,
             "folders": dict(sorted(self.folders.items())),
+            "folder_hashes": dict(sorted(self.folder_hashes.items())),
             "pages": dict(sorted(self.pages.items())),
         }
         self._path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8", newline="\n")

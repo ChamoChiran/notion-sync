@@ -77,10 +77,16 @@ class NotionClient:
     # -- pages ---------------------------------------------------------
 
     @staticmethod
-    def _title_property(title):
-        return {"title": {"title": [{"text": {"content": title[:2000]}}]}}
+    def _page_properties(title=None, icon=None):
+        """Request fields for a page's title and/or emoji icon; omitted ones stay unchanged."""
+        fields = {}
+        if title is not None:
+            fields["properties"] = {"title": {"title": [{"text": {"content": title[:2000]}}]}}
+        if icon:
+            fields["icon"] = {"type": "emoji", "emoji": icon}
+        return fields
 
-    def create_page(self, parent, title):
+    def create_page(self, parent, title, icon=None):
         """Create an empty page with a title.
 
         `parent` is a Notion parent object: a page (`{"type": "page_id", ...}`) or the
@@ -88,13 +94,12 @@ class NotionClient:
         explicitly: creating from a Markdown `# Heading` alone leaves it empty.
         """
         return self._request("POST", "/pages", {
-            "parent": parent, "properties": self._title_property(title),
+            "parent": parent, **self._page_properties(title, icon),
         })
 
-    def set_title(self, page_id, title):
-        return self._request("PATCH", f"/pages/{page_id}", {
-            "properties": self._title_property(title),
-        })
+    def set_title(self, page_id, title=None, icon=None):
+        """Set a page's title and/or emoji icon."""
+        return self._request("PATCH", f"/pages/{page_id}", self._page_properties(title, icon))
 
     def trash_page(self, page_id):
         return self._request("PATCH", f"/pages/{page_id}", {"in_trash": True})

@@ -66,26 +66,56 @@ notion-sync publish docs --prune
   run the command. **Commit it**, so every run updates the same pages. A map from an older
   layout is ignored and rebuilt.
 - Pages cannot hold properties, so optional front matter (`status`, `owner`, `component`,
-  `last_reviewed`) is shown as a one-line summary at the top of each page. Keep it flat
-  (`key: value`, no inline comments):
+  `last_reviewed`) is shown as a callout at the top of each page, coloured by status
+  (green: Accepted/Approved/Active/Final/Stable, yellow: Draft/Proposed, red:
+  Deprecated/Superseded/Rejected, grey otherwise). Keep it flat (`key: value`, no inline
+  comments):
 
   ```markdown
   ---
   status: Draft
   owner: Name
   last_reviewed: 2026-10-15
+  order: 2
+  icon: 🧭
   ---
   # Page title
   ```
 
   The first `# ` heading becomes the page title (not repeated in the body).
-- Relative links between `.md` files are rewritten to Notion page links; links to files that
-  aren't published stay as they are.
-- Order: top-level files first, then folders, alphabetical by path.
+- **Reading order**: within a folder, documents come first, then subfolders. Each is sorted
+  by the `order` number in front matter (lowest first; no `order` sorts last), then by path.
+  A folder takes its `order` from its `index.md`. The table of contents, the folder
+  listings and Previous / Next all follow this order.
+- **Navigation on every page**: a breadcrumb at the top (`Docs / Architecture / ...`, each
+  part a link) and a footer `← Previous | Docs home | Next →` that walks the whole book in
+  reading order: root, then each folder page followed by its documents. Changing the order
+  or a title rewrites only the pages whose neighbours changed.
+- **Folder pages**: a folder's `index.md` (or else `README.md`; not the top-level one) is the
+  body of its folder page, followed by an "In this section" list. It has no page of its own.
+  Without one, the folder page is just the list.
+- **On this page**: pages with three or more `##`/`###` headings get Notion's table of
+  contents block after the header.
+- **Icons**: the root is 📚, folders get an emoji by name (`architecture`, `runbooks`,
+  `decisions`, ...; 📁 otherwise), documents get 📄. Set `icon:` in front matter to
+  override.
+- **Links**: relative `.md` links become Notion page links, `folder/` links become the
+  folder page, and a link to a folder's `index.md` goes to the folder page. With
+  `--source-url https://github.com/org/repo/blob/main`, links to other files inside the
+  docs folder become links to that URL. Any link that resolves to nothing is left as is and
+  printed as `warning:` (it would be a dead link in Notion). Section anchors
+  (`file.md#heading`) are dropped, because Notion cannot link to a heading. Images are not
+  touched.
 - `--prune` moves pages for deleted files, and folders left empty, to Notion's trash.
-- If a page is deleted in Notion, the next run recreates it.
+- If a page is deleted in Notion, the next run recreates it. (Pages that list it catch up
+  on the run after.)
+- `--title` sets the root page title: required-ish on the first run (default `Docs`), and
+  it renames the root when it differs later. The title is kept in `notion-map.json` for the
+  breadcrumbs.
 - A changed title in git renames the page. Not handled: moving a file (a moved file
   becomes a new page; use `--prune` to trash the old one).
+- Upgrading from 0.4: the map file stays compatible. The first run rewrites every page once
+  (new header and footer) and adds icons.
 
 `notion-sync trash <page-url-or-id> [--database]` moves a page or database to Notion's trash.
 
@@ -107,6 +137,10 @@ notion-sync publish docs --prune
 | `page_ref.py` | `PageRef` | parse a page URL or ID |
 | `client.py` | `NotionClient` | HTTP, auth, retry/backoff, Markdown endpoints |
 | `service.py` | `PageSyncService` | pull / push / edit / search use cases |
+| `publisher.py` | `DocsPublisher` | publish a folder as a page tree |
+| `nav.py` | `Navigation` | reading order, folder landing pages |
+| `layout.py` | | breadcrumb, footer, callout, icons |
+| `links.py` | `LinkRewriter` | resolve relative links, collect warnings |
 | `cli.py` | `Cli` | argument parsing and output |
 | `errors.py` | `NotionSyncError` + subclasses | user-facing errors |
 

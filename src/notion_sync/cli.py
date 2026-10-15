@@ -56,7 +56,11 @@ class Cli:
                              help="file mapping docs to Notion pages (commit it)")
         publish.add_argument("--parent",
                              help="Notion page URL, or 'workspace', to create the root page under (first run only)")
-        publish.add_argument("--title", default="Docs", help="root page title (first run only)")
+        publish.add_argument("--title",
+                             help="root page title (default 'Docs' on the first run; renames the root otherwise)")
+        publish.add_argument("--source-url",
+                             help="base URL for links to non-Markdown files in the docs folder, "
+                                  "e.g. https://github.com/org/repo/blob/main")
         publish.add_argument("--prune", action="store_true",
                              help="move pages whose file no longer exists to Notion's trash")
         publish.set_defaults(handler=self._publish)
@@ -114,7 +118,10 @@ class Cli:
     def _publish(self, args):
         report = self._publisher_factory().publish(
             args.folder, args.state, parent=args.parent, title=args.title, prune=args.prune,
+            source_url=args.source_url,
         )
+        for warning in report.warnings:
+            print(f"warning: {warning}", file=sys.stderr)
         print(
             f"published: {report.created} created, {report.updated} updated, "
             f"{report.unchanged} unchanged, {report.trashed} trashed"

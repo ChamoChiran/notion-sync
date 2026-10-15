@@ -25,6 +25,14 @@ class Document:
     body: str
     meta: dict = field(default_factory=dict)
 
+    @property
+    def order(self):
+        """The `order` front matter value as an int, or None when absent or not a number."""
+        try:
+            return int(self.meta.get("order", ""))
+        except ValueError:
+            return None
+
 
 class FrontMatterParser:
     """Splits `---` delimited front matter (flat `key: value` lines) from Markdown."""
