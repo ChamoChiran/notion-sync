@@ -81,7 +81,7 @@ notion-sync publish docs --prune
 - Order: top-level files first, then folders, alphabetical by path.
 - `--prune` moves pages for deleted files, and folders left empty, to Notion's trash.
 - If a page is deleted in Notion, the next run recreates it.
-- Not handled: renaming a page's title after creation, and moving a file (a moved file
+- A changed title in git renames the page. Not handled: moving a file (a moved file
   becomes a new page; use `--prune` to trash the old one).
 
 `notion-sync trash <page-url-or-id> [--database]` moves a page or database to Notion's trash.

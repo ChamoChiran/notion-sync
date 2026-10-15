@@ -73,12 +73,18 @@ class FakeClient:
         self.fail_404_for = set()
         self.titles = {}
 
-    def create_page(self, parent, markdown):
+    def create_page(self, parent, title):
         self.n += 1
         pid = f"00000000-0000-0000-0000-{self.n:012d}"
-        self.titles[pid] = markdown.strip().lstrip("# ")
-        self.calls.append(("create_page", parent, markdown, pid))
+        self.titles[pid] = title
+        self.calls.append(("create_page", parent, title, pid))
         return {"id": pid}
+
+    def set_title(self, pid, title):
+        if pid in self.fail_404_for:
+            raise NotionApiError(404, "PATCH", "/x", "{}")
+        self.titles[pid] = title
+        self.calls.append(("set_title", pid, title))
 
     def replace_markdown(self, pid, body, allow_deleting_content=False):
         if pid in self.fail_404_for:
@@ -124,7 +130,7 @@ class PublisherTests(unittest.TestCase):
         self.assertEqual(by_title["A"][1]["page_id"], saved["folders"]["architecture"])
         self.assertEqual(by_title["Components"][1]["page_id"], saved["folders"]["architecture"])
         self.assertEqual(by_title["C"][1]["page_id"], saved["folders"]["architecture/components"])
-        self.assertEqual(saved["version"], 2)
+        self.assertEqual(saved["version"], 3)
 
     def test_content_has_header_and_rewritten_links(self):
         with tempfile.TemporaryDirectory() as d:
@@ -198,6 +204,29 @@ class PublisherTests(unittest.TestCase):
         self.assertNotEqual(old, after.pages["architecture/a.md"]["id"])
         self.assertEqual(self.pages(client)[0][1]["page_id"], before.folders["architecture"])
         self.assertEqual(report.updated, 1)
+
+    def test_every_page_gets_a_title(self):
+        """Regression: pages created without an explicit title show as 'Untitled' in Notion."""
+        with tempfile.TemporaryDirectory() as d:
+            client = FakeClient()
+            DocsPublisher(client).publish(self.make_root(d), Path(d) / "m.json", parent=PARENT,
+                                          title="Centric Docs")
+        created = [c[3] for c in self.pages(client)]
+        self.assertEqual(len(created), 6)
+        self.assertTrue(all(client.titles[pid].strip() for pid in created))
+        self.assertEqual(client.titles[created[0]], "Centric Docs")
+        self.assertIn("Architecture", client.titles.values())
+
+    def test_renamed_title_updates_the_page(self):
+        with tempfile.TemporaryDirectory() as d:
+            root, state = self.make_root(d), Path(d) / "map.json"
+            DocsPublisher(FakeClient()).publish(root, state, parent=PARENT)
+            (root / "architecture" / "a.md").write_text(
+                "---\nstatus: Draft\nowner: Me\n---\n\n# A Renamed\n\ntext\n", encoding="utf-8")
+            client = FakeClient()
+            report = DocsPublisher(client).publish(root, state)
+        self.assertEqual((report.updated, report.unchanged), (1, 2))
+        self.assertEqual([c[2] for c in client.calls if c[0] == "set_title"], ["A Renamed"])
 
     def test_cli_publish(self):
         class FakePublisher:

@@ -76,13 +76,25 @@ class NotionClient:
 
     # -- pages ---------------------------------------------------------
 
-    def create_page(self, parent, markdown):
-        """Create a page from Markdown; a leading `# ` heading becomes its title.
+    @staticmethod
+    def _title_property(title):
+        return {"title": {"title": [{"text": {"content": title[:2000]}}]}}
+
+    def create_page(self, parent, title):
+        """Create an empty page with a title.
 
         `parent` is a Notion parent object: a page (`{"type": "page_id", ...}`) or the
-        workspace (`{"type": "workspace", "workspace": True}`).
+        workspace (`{"type": "workspace", "workspace": True}`). The title is set
+        explicitly: creating from a Markdown `# Heading` alone leaves it empty.
         """
-        return self._request("POST", "/pages", {"parent": parent, "markdown": markdown})
+        return self._request("POST", "/pages", {
+            "parent": parent, "properties": self._title_property(title),
+        })
+
+    def set_title(self, page_id, title):
+        return self._request("PATCH", f"/pages/{page_id}", {
+            "properties": self._title_property(title),
+        })
 
     def trash_page(self, page_id):
         return self._request("PATCH", f"/pages/{page_id}", {"in_trash": True})

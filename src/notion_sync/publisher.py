@@ -68,7 +68,7 @@ class DocsPublisher:
             raise ConfigError(
                 "no root page yet: pass --parent <Notion page URL> (or 'workspace') for the first run"
             )
-        state.root_id = self._client.create_page(self._parent_object(parent), f"# {title}\n")["id"]
+        state.root_id = self._client.create_page(self._parent_object(parent), title)["id"]
         state.save()
 
     @staticmethod
@@ -96,11 +96,11 @@ class DocsPublisher:
             if folder not in state.folders:
                 name = posixpath.basename(folder).replace("-", " ").replace("_", " ").title()
                 state.folders[folder] = self._client.create_page(
-                    self._page_parent(parent_id), f"# {name}\n")["id"]
+                    self._page_parent(parent_id), name)["id"]
                 report.created += 1
             parent_id = state.folders[folder]
         if doc.path not in state.pages:
-            page = self._client.create_page(self._page_parent(parent_id), f"# {doc.title}\n")
+            page = self._client.create_page(self._page_parent(parent_id), doc.title)
             state.pages[doc.path] = {"id": page["id"], "hash": ""}
             report.created += 1
 
@@ -114,22 +114,25 @@ class DocsPublisher:
 
     def _sync_page(self, state, doc, body, report):
         entry = state.pages[doc.path]
-        digest = hashlib.sha256(body.encode()).hexdigest()
+        digest = hashlib.sha256((doc.title + "\n" + body).encode()).hexdigest()
         if entry["hash"] == digest:
             report.unchanged += 1
             return
         try:
-            self._client.replace_markdown(entry["id"], body)
+            self._write(entry["id"], doc.title, body)
         except NotionApiError as e:
             if e.status != 404:
                 raise
             # Page was deleted in Notion: recreate it and write again.
             parent_id = self._parent_for(state, doc.path)
-            entry["id"] = self._client.create_page(
-                self._page_parent(parent_id), f"# {doc.title}\n")["id"]
-            self._client.replace_markdown(entry["id"], body)
+            entry["id"] = self._client.create_page(self._page_parent(parent_id), doc.title)["id"]
+            self._write(entry["id"], doc.title, body)
         entry["hash"] = digest
         report.updated += 1
+
+    def _write(self, page_id, title, body):
+        self._client.set_title(page_id, title)  # also picks up a renamed title
+        self._client.replace_markdown(page_id, body)
 
     def _prune(self, state, docs, report):
         current = {d.path for d in docs}

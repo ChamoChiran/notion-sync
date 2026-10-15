@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-STATE_VERSION = 2
+STATE_VERSION = 3
 
 
 class PublishState:
